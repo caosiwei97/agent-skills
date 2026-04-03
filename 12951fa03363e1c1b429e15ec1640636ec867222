@@ -1,0 +1,23 @@
+skills/commit/SKILL.md
+  ece1f507211728fd 10,12,17,22,26,30-31
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "12951fa03363e1c1b429e15ec1640636ec867222",
+  "prompts": {
+    "ece1f507211728fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "opencode-transcript-ses_2ad78401dffenMEeu57DmNT760-a42874e3-56b0-4f5d-95a8-22af1bb16035",
+        "model": "unknown"
+      },
+      "human_author": "caosiwei",
+      "messages": [],
+      "total_additions": 7,
+      "total_deletions": 9,
+      "accepted_lines": 7,
+      "overriden_lines": 0
+    }
+  }
+}
