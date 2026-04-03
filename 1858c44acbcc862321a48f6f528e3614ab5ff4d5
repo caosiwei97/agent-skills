@@ -1,0 +1,23 @@
+skills/commit/README.md
+  d3a72ee1e9ac0ece 7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "1858c44acbcc862321a48f6f528e3614ab5ff4d5",
+  "prompts": {
+    "d3a72ee1e9ac0ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "opencode-transcript-ses_2ad78401dffenMEeu57DmNT760-9fc5e488-5f54-4be2-9f7b-9cf95f3789d4",
+        "model": "unknown"
+      },
+      "human_author": "caosiwei",
+      "messages": [],
+      "total_additions": 1,
+      "total_deletions": 0,
+      "accepted_lines": 1,
+      "overriden_lines": 0
+    }
+  }
+}
