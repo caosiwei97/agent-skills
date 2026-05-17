@@ -152,6 +152,66 @@ Wait for confirmation before creating any files.
 - `interactive.html` — too complex to auto-generate reliably
 - `index.mjs` — user's executable code
 
+## Step 3.5: Validate Cases ⚠️ REQUIRED (after generation/splitting, before final delivery)
+
+After cases are created (raw mode) or scanned (pre-built mode), validate that everything works. This step runs BEFORE confirming the final plan with the user.
+
+### Validation checklist
+
+For each case with `index.mjs`:
+1. **Code execution**: POST `/api/run` with `{caseId}` — must return SSE events including `exit` with `code: 0`
+2. **Knowledge tab**: GET `/api/file/cases/:caseId/knowledge.md` — must return 200 with non-empty content
+3. **Diagram tab**: If `diagram.mmd` exists, GET `/api/file/cases/:caseId/diagram.mmd` — must return valid mermaid
+4. **Mindmap tab**: If `mindmap.md` exists, GET `/api/file/cases/:caseId/mindmap.md` — must return valid heading structure
+
+Global checks:
+5. **Case list**: GET `/api/cases` — must return array with correct count
+6. **Excalidraw overview**: GET `/api/excalidraw/overview` — must return 200 or 404 (not 500)
+
+### Validation procedure
+
+```bash
+# 1. Start server on a test port
+node scripts/serve.mjs --dir <content-dir> --port 38889
+
+# 2. Run validation script
+node scripts/validate.mjs --port 38889
+
+# 3. Stop test server
+node scripts/serve.mjs --stop --port 38889
+```
+
+Or validate via API calls directly:
+```bash
+# Quick validation via curl
+PORT=38889
+curl -s http://localhost:$PORT/api/cases | jq length   # should match expected case count
+
+# Validate each case
+for caseId in $(curl -s http://localhost:$PORT/api/cases | jq -r '.[].id'); do
+  echo "=== $caseId ==="
+  # Check knowledge.md
+  curl -s -o /dev/null -w "knowledge: %{http_code}\n" http://localhost:$PORT/api/file/cases/$caseId/knowledge.md
+  # Check code execution (if index.mjs exists)
+  has_code=$(curl -s http://localhost:$PORT/api/cases | jq -r ".[] | select(.id==\"$caseId\") | .files | contains([\"index.mjs\"])")
+  if [ "$has_code" = "true" ]; then
+    timeout 10 curl -s -N -X POST http://localhost:$PORT/api/run -H 'Content-Type: application/json' -d "{\"caseId\":\"$caseId\"}" | grep -q '"type":"exit"'
+    echo "execution: $?"
+  fi
+done
+```
+
+### If validation fails
+
+1. Identify which cases/tabs failed
+2. Fix the root cause (missing dependency, broken import path, invalid mermaid, etc.)
+3. Re-run validation
+4. Repeat until all checks pass
+
+### Validation must pass before telling the user "done"
+
+NEVER return the URL to the user if validation has not passed. A broken page is worse than no page.
+
 ## Step 4: Confirm Plan
 
 ### Raw mode summary:

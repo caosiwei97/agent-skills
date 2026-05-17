@@ -83,6 +83,98 @@ const EXCLUDED_CASE_DIRS = new Set([
   'node_modules', 'dist', '.git', '.playwright-mcp',
 ]);
 
+/**
+ * Auto-detect where cases live.
+ * If rootDir has a `cases/` subdirectory with case-like subdirs (containing
+ * index.mjs or knowledge.md), use rootDir/cases/ as the cases directory.
+ * Otherwise, treat rootDir itself as the cases directory.
+ * Returns { casesDir, projectRoot }.
+ */
+function detectLayout(rootDir) {
+  const candidate = join(rootDir, 'cases');
+  if (!existsSync(candidate) || !statSync(candidate).isDirectory()) {
+    // rootDir has no cases/ subdir → rootDir IS the cases dir
+    // project root is likely the parent
+    return { casesDir: rootDir, projectRoot: dirname(rootDir) };
+  }
+
+  const entries = readdirSync(candidate, { withFileTypes: true })
+    .filter(d => d.isDirectory() && !d.name.startsWith('_') && !d.name.startsWith('.') && !EXCLUDED_CASE_DIRS.has(d.name));
+
+  // If at least one subdir looks like a case (has index.mjs or knowledge.md), use it
+  const hasCases = entries.some(d => {
+    const dir = join(candidate, d.name);
+    return existsSync(join(dir, 'index.mjs')) || existsSync(join(dir, 'knowledge.md'));
+  });
+
+  if (hasCases) {
+    return { casesDir: candidate, projectRoot: rootDir };
+  }
+  return { casesDir: rootDir, projectRoot: dirname(rootDir) };
+}
+
+/**
+ * Walk up the directory tree to find a node_modules directory containing a given package.
+ */
+function findNodeModulesFile(pkg, subpath, startDir) {
+  let dir = startDir;
+  for (let i = 0; i < 10; i++) {
+    const p = join(dir, 'node_modules', pkg, subpath);
+    if (existsSync(p)) return p;
+    const parent = dirname(dir);
+    if (parent === dir) break; // reached filesystem root
+    dir = parent;
+  }
+  return null;
+}
+
+/**
+ * Search for a vendor package file across multiple search roots.
+ * Checks: skill assets → skill node_modules → each search root's node_modules tree → deep scan.
+ */
+function findVendorFile(pkg, subpath, searchRoots) {
+  // Skill-level searches
+  const assetPath = join(ASSETS_DIR, 'vendor', subpath.split('/').pop());
+  if (existsSync(assetPath)) return assetPath;
+  const skillPath = join(__dirname, 'node_modules', pkg, subpath);
+  if (existsSync(skillPath)) return skillPath;
+
+  // Walk up from each search root
+  for (const root of searchRoots) {
+    const found = findNodeModulesFile(pkg, subpath, root);
+    if (found) return found;
+  }
+
+  // Deep scan: look in subdirectories' node_modules (handles pnpm monorepos where
+  // deps are in apps/*/node_modules/ rather than root node_modules/)
+  for (const root of searchRoots) {
+    const found = scanForPackage(root, pkg, subpath, 3);
+    if (found) return found;
+  }
+  return null;
+}
+
+/**
+ * Scan directory tree (up to maxDepth) for node_modules/<pkg>/<subpath>.
+ */
+function scanForPackage(baseDir, pkg, subpath, maxDepth) {
+  if (maxDepth <= 0) return null;
+  try {
+    const entries = readdirSync(baseDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      if (entry.name === 'node_modules') {
+        const p = join(baseDir, 'node_modules', pkg, subpath);
+        if (existsSync(p)) return p;
+      } else if (!entry.name.startsWith('.') && entry.name !== 'dist' && entry.name !== '.git') {
+        const found = scanForPackage(join(baseDir, entry.name), pkg, subpath, maxDepth - 1);
+        if (found) return found;
+      }
+    }
+  } catch {}
+  return null;
+}
+
 async function startServer() {
   let Hono, serve, streamSSE;
   try {
@@ -98,6 +190,10 @@ async function startServer() {
   }
 
   const rootDir = opts.dir;
+  const { casesDir, projectRoot } = detectLayout(rootDir);
+  // Search roots for vendor/excalidraw lookups: projectRoot + rootDir + parent of rootDir
+  const searchRoots = [rootDir, projectRoot, dirname(rootDir)];
+
   const app = new Hono();
 
   // CORS
@@ -107,8 +203,7 @@ async function startServer() {
     c.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
   });
 
-  // Vendor JS routes — try to serve from server's node_modules or skill assets
-  const vendorDir = join(ASSETS_DIR, 'vendor');
+  // Vendor JS routes — search multiple locations for packages
   const vendorFiles = {
     '/vendor/marked.js': ['marked', 'lib/marked.umd.js'],
     '/vendor/mermaid.js': ['mermaid', 'dist/mermaid.min.js'],
@@ -119,15 +214,10 @@ async function startServer() {
 
   for (const [route, [pkg, subpath]] of Object.entries(vendorFiles)) {
     app.get(route, (c) => {
-      // Try assets/vendor first, then node_modules
-      const assetPath = join(vendorDir, subpath.split('/').pop());
-      const modulePath = join(__dirname, 'node_modules', pkg, subpath);
-
-      for (const p of [assetPath, modulePath]) {
-        if (existsSync(p)) {
-          const content = readFileSync(p);
-          return c.body(content, 200, { 'Content-Type': 'application/javascript' });
-        }
+      const found = findVendorFile(pkg, subpath, searchRoots);
+      if (found) {
+        const content = readFileSync(found);
+        return c.body(content, 200, { 'Content-Type': 'application/javascript' });
       }
       return c.json({ error: `Vendor file not found: ${pkg}/${subpath}` }, 404);
     });
@@ -137,8 +227,8 @@ async function startServer() {
   app.get('*', async (c, next) => {
     const urlPath = c.req.path;
 
-    // API routes pass through
-    if (urlPath.startsWith('/api/')) return next();
+    // API routes and vendor routes pass through
+    if (urlPath.startsWith('/api/') || urlPath.startsWith('/vendor/')) return next();
 
     // Serve static files from web-dist
     let filePath = urlPath === '/' ? '/index.html' : urlPath;
@@ -167,34 +257,111 @@ async function startServer() {
     return resolved.startsWith(normalize(allowedBase));
   }
 
-  // ── Flexible lib path: check rootDir/lib/ and rootDir/cases/lib/ ──
+  // ── Flexible lib path: check casesDir/lib/ and rootDir/cases/lib/ ──
   function resolveLibDir() {
-    const primary = join(rootDir, 'lib');
+    const primary = join(casesDir, 'lib');
     if (existsSync(primary) && statSync(primary).isDirectory()) return primary;
-    const secondary = join(rootDir, 'cases', 'lib');
+    const secondary = join(rootDir, 'lib');
     if (existsSync(secondary) && statSync(secondary).isDirectory()) return secondary;
     return null;
   }
 
-  // ── Flexible excalidraw fallback: check multiple locations ──
-  function findExcalidrawGlobal() {
-    const searchPaths = [
-      join(rootDir, 'content', 'overview.excalidraw'),
-      join(rootDir, 'assets', 'overview.excalidraw'),
-      join(rootDir, 'source', 'assets', 'overview.excalidraw'),
+  // ── Find excalidraw files in project ──
+  // Search both projectRoot and rootDir (and parent dirs) for excalidraw assets
+  function findExcalidrawDir() {
+    const allSearchDirs = [
+      join(projectRoot, 'source', 'assets'),
+      join(projectRoot, 'assets'),
+      join(projectRoot, 'content'),
+      join(rootDir, 'source', 'assets'),
+      join(rootDir, 'assets'),
+      join(rootDir, 'content'),
+      join(casesDir, 'source', 'assets'),
+      join(casesDir, 'assets'),
+      join(casesDir, 'content'),
+      // Also check parent of rootDir in case --dir points to a subdirectory
+      join(dirname(rootDir), 'source', 'assets'),
+      join(dirname(rootDir), 'assets'),
+      join(dirname(rootDir), 'content'),
     ];
-    // Also scan for any .excalidraw in assets/ and content/
-    for (const dir of [join(rootDir, 'assets'), join(rootDir, 'content'), join(rootDir, 'source', 'assets')]) {
-      if (existsSync(dir) && statSync(dir).isDirectory()) {
-        const files = readdirSync(dir).filter(f => f.endsWith('.excalidraw'));
-        for (const f of files) {
-          const p = join(dir, f);
-          if (!searchPaths.includes(p)) searchPaths.push(p);
-        }
+    // Deduplicate
+    const seen = new Set();
+    const searchDirs = allSearchDirs.filter(d => {
+      if (seen.has(d)) return false;
+      seen.add(d);
+      return true;
+    });
+    for (const d of searchDirs) {
+      if (existsSync(d) && statSync(d).isDirectory()) {
+        const files = readdirSync(d).filter(f => f.endsWith('.excalidraw'));
+        if (files.length > 0) return d;
       }
     }
+    return null;
+  }
+
+  function findExcalidrawGlobal() {
+    // Try well-known locations across projectRoot, rootDir, and parent
+    const allSearchPaths = [
+      join(projectRoot, 'source', 'assets', 'overview.excalidraw'),
+      join(projectRoot, 'assets', 'overview.excalidraw'),
+      join(projectRoot, 'content', 'overview.excalidraw'),
+      join(rootDir, 'source', 'assets', 'overview.excalidraw'),
+      join(rootDir, 'assets', 'overview.excalidraw'),
+      join(rootDir, 'content', 'overview.excalidraw'),
+      join(casesDir, 'source', 'assets', 'overview.excalidraw'),
+      join(casesDir, 'assets', 'overview.excalidraw'),
+      join(casesDir, 'content', 'overview.excalidraw'),
+      join(dirname(rootDir), 'source', 'assets', 'overview.excalidraw'),
+      join(dirname(rootDir), 'assets', 'overview.excalidraw'),
+      join(dirname(rootDir), 'content', 'overview.excalidraw'),
+    ];
+    // Deduplicate
+    const seen = new Set();
+    const searchPaths = allSearchPaths.filter(p => {
+      if (seen.has(p)) return false;
+      seen.add(p);
+      return true;
+    });
     for (const p of searchPaths) {
       if (existsSync(p)) return p;
+    }
+
+    // Scan excalidraw directories for overview
+    const excalidrawDir = findExcalidrawDir();
+    if (excalidrawDir) {
+      const overview = join(excalidrawDir, 'overview.excalidraw');
+      if (existsSync(overview)) return overview;
+      // Return first .excalidraw found
+      const files = readdirSync(excalidrawDir).filter(f => f.endsWith('.excalidraw')).sort();
+      if (files.length > 0) return join(excalidrawDir, files[0]);
+    }
+    return null;
+  }
+
+  /**
+   * Find section-level excalidraw fallback for a case based on its group.
+   * Matches the reference server's behavior: cases in certain groups get a
+   * section-level diagram instead of the global overview.
+   */
+  function findExcalidrawForGroup(group) {
+    const excalidrawDir = findExcalidrawDir();
+    if (!excalidrawDir) return null;
+
+    // Look for section-level files that might match the group
+    // Reference uses: 运行时安全 → section-3-fuses.excalidraw
+    const groupToPatterns = {
+      '运行时安全': ['section-3', 'fuses', 'safety', 'fuse'],
+      '容错机制': ['section-2', 'fault', 'tolerance', 'retry'],
+      '流式响应': ['section-1', 'streaming', 'stream', 'sse'],
+    };
+
+    const patterns = groupToPatterns[group] || [];
+    const allFiles = readdirSync(excalidrawDir).filter(f => f.endsWith('.excalidraw')).sort();
+
+    for (const pattern of patterns) {
+      const match = allFiles.find(f => f.toLowerCase().includes(pattern.toLowerCase()));
+      if (match) return join(excalidrawDir, match);
     }
     return null;
   }
@@ -202,7 +369,6 @@ async function startServer() {
   // GET /api/cases
   app.get('/api/cases', (c) => {
     try {
-      const casesDir = rootDir;
       const entries = readdirSync(casesDir, { withFileTypes: true })
         .filter(d =>
           d.isDirectory() &&
@@ -218,16 +384,16 @@ async function startServer() {
 
         // Try to parse metadata from index.mjs
         const indexPath = join(caseDir, 'index.mjs');
-        let title = caseId, group = '', description = '';
+        let title = caseId, group = '未分组', description = '';
         if (existsSync(indexPath)) {
           const content = readFileSync(indexPath, 'utf-8');
           title = (content.match(/@title\s+(.+)/) || [])[1]?.trim() || caseId;
-          group = (content.match(/@group\s+(.+)/) || [])[1]?.trim() || '';
+          group = (content.match(/@group\s+(.+)/) || [])[1]?.trim() || '未分组';
           description = (content.match(/@description\s+(.+)/) || [])[1]?.trim() || '';
         }
 
         const files = readdirSync(caseDir).filter(f => !f.startsWith('_')).sort();
-        const hasOwnExcalidraw = readdirSync(caseDir).some(f => f.endsWith('.excalidraw'));
+        const hasOwnExcalidraw = existsSync(join(caseDir, 'overview.excalidraw'));
 
         const content = {
           knowledge: existsSync(join(caseDir, 'knowledge.md')),
@@ -239,6 +405,24 @@ async function startServer() {
 
         return { id: caseId, title, group, description, entryFile: 'index.mjs', files, content };
       });
+
+      // Compute section numbers from group ordering (match reference server behavior)
+      const groupCounters = {};
+      for (const c of cases) {
+        groupCounters[c.group] = (groupCounters[c.group] || 0) + 1;
+      }
+      // Assign section numbers based on order of first appearance
+      const groupOrder = [];
+      for (const c of cases) {
+        if (!groupOrder.includes(c.group)) groupOrder.push(c.group);
+      }
+      const groupIndex = {};
+      const groupSubCounters = {};
+      for (const c of cases) {
+        const gIdx = groupOrder.indexOf(c.group) + 1;
+        groupSubCounters[c.group] = (groupSubCounters[c.group] || 0) + 1;
+        c.section = `${gIdx}.${groupSubCounters[c.group]}`;
+      }
 
       return c.json(cases);
     } catch (err) {
@@ -257,32 +441,51 @@ async function startServer() {
   // GET /api/excalidraw/cases/:caseId
   app.get('/api/excalidraw/cases/:caseId', (c) => {
     const caseId = c.req.param('caseId');
-    const caseDir = join(rootDir, caseId);
+    const caseDir = join(casesDir, caseId);
 
-    // Case-level excalidraw
-    const excalidrawFiles = existsSync(caseDir) ? readdirSync(caseDir).filter(f => f.endsWith('.excalidraw')) : [];
-    if (excalidrawFiles.length > 0) {
-      try { return c.json(JSON.parse(readFileSync(join(caseDir, excalidrawFiles[0]), 'utf-8'))); }
+    // Case-level excalidraw (prefer overview.excalidraw like reference server)
+    const overviewPath = join(caseDir, 'overview.excalidraw');
+    if (existsSync(overviewPath)) {
+      try { return c.json(JSON.parse(readFileSync(overviewPath, 'utf-8'))); }
       catch (err) { return c.json({ error: err.message }, 500); }
     }
 
-    // Global fallback (flexible paths)
-    const globalPath = findExcalidrawGlobal();
-    if (globalPath) {
-      try { return c.json(JSON.parse(readFileSync(globalPath, 'utf-8'))); }
-      catch (err) { return c.json({ error: err.message }, 500); }
+    // Section-level fallback: check if the case's group has a section excalidraw
+    const indexPath = join(caseDir, 'index.mjs');
+    if (existsSync(indexPath)) {
+      const content = readFileSync(indexPath, 'utf-8');
+      const group = (content.match(/@group\s+(.+)/) || [])[1]?.trim() || '';
+      const sectionPath = findExcalidrawForGroup(group);
+      if (sectionPath) {
+        try { return c.json(JSON.parse(readFileSync(sectionPath, 'utf-8'))); }
+        catch (err) { return c.json({ error: err.message }, 500); }
+      }
     }
+
+    // No own excalidraw and no section fallback → 404 (matches reference server behavior)
 
     return c.json({ error: 'not found' }, 404);
+  });
+
+  // GET /api/excalidraw/section/:name
+  app.get('/api/excalidraw/section/:name', (c) => {
+    const name = c.req.param('name');
+    const excalidrawDir = findExcalidrawDir();
+    if (!excalidrawDir) return c.json({ error: 'not found' }, 404);
+
+    const filepath = join(excalidrawDir, `${name}.excalidraw`);
+    if (!existsSync(filepath)) return c.json({ error: 'not found' }, 404);
+    try { return c.json(JSON.parse(readFileSync(filepath, 'utf-8'))); }
+    catch (err) { return c.json({ error: err.message }, 500); }
   });
 
   // GET /api/file/cases/:caseId/:file
   app.get('/api/file/cases/:caseId/:file', (c) => {
     const caseId = c.req.param('caseId');
     const file = c.req.param('file');
-    const filepath = join(rootDir, caseId, file);
+    const filepath = join(casesDir, caseId, file);
 
-    if (!isPathSafe(join(caseId, file), rootDir)) return c.json({ error: 'forbidden' }, 403);
+    if (!isPathSafe(join(caseId, file), casesDir)) return c.json({ error: 'forbidden' }, 403);
     if (!existsSync(filepath)) return c.json({ error: 'not found' }, 404);
 
     try { return c.text(readFileSync(filepath, 'utf-8')); }
@@ -307,6 +510,8 @@ async function startServer() {
   serve({ fetch: app.fetch, port: opts.port }, () => {
     console.log(`Teaching Viz -> http://localhost:${opts.port}`);
     console.log(`Content dir: ${rootDir}`);
+    if (casesDir !== rootDir) console.log(`Cases dir:  ${casesDir}`);
+    if (projectRoot !== rootDir) console.log(`Project root: ${projectRoot}`);
   });
 }
 
