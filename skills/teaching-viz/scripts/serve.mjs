@@ -77,6 +77,12 @@ const SKILL_DIR = join(__dirname, '..');
 const ASSETS_DIR = join(SKILL_DIR, 'assets');
 const WEB_DIST_DIR = join(ASSETS_DIR, 'web-dist');
 
+// Directories to exclude when listing cases
+const EXCLUDED_CASE_DIRS = new Set([
+  'lib', 'content', 'source', 'assets', 'apps',
+  'node_modules', 'dist', '.git', '.playwright-mcp',
+]);
+
 async function startServer() {
   let Hono, serve, streamSSE;
   try {
@@ -161,12 +167,49 @@ async function startServer() {
     return resolved.startsWith(normalize(allowedBase));
   }
 
+  // ── Flexible lib path: check rootDir/lib/ and rootDir/cases/lib/ ──
+  function resolveLibDir() {
+    const primary = join(rootDir, 'lib');
+    if (existsSync(primary) && statSync(primary).isDirectory()) return primary;
+    const secondary = join(rootDir, 'cases', 'lib');
+    if (existsSync(secondary) && statSync(secondary).isDirectory()) return secondary;
+    return null;
+  }
+
+  // ── Flexible excalidraw fallback: check multiple locations ──
+  function findExcalidrawGlobal() {
+    const searchPaths = [
+      join(rootDir, 'content', 'overview.excalidraw'),
+      join(rootDir, 'assets', 'overview.excalidraw'),
+      join(rootDir, 'source', 'assets', 'overview.excalidraw'),
+    ];
+    // Also scan for any .excalidraw in assets/ and content/
+    for (const dir of [join(rootDir, 'assets'), join(rootDir, 'content'), join(rootDir, 'source', 'assets')]) {
+      if (existsSync(dir) && statSync(dir).isDirectory()) {
+        const files = readdirSync(dir).filter(f => f.endsWith('.excalidraw'));
+        for (const f of files) {
+          const p = join(dir, f);
+          if (!searchPaths.includes(p)) searchPaths.push(p);
+        }
+      }
+    }
+    for (const p of searchPaths) {
+      if (existsSync(p)) return p;
+    }
+    return null;
+  }
+
   // GET /api/cases
   app.get('/api/cases', (c) => {
     try {
       const casesDir = rootDir;
       const entries = readdirSync(casesDir, { withFileTypes: true })
-        .filter(d => d.isDirectory() && !d.name.startsWith('_') && d.name !== 'content' && d.name !== 'lib')
+        .filter(d =>
+          d.isDirectory() &&
+          !d.name.startsWith('_') &&
+          !d.name.startsWith('.') &&
+          !EXCLUDED_CASE_DIRS.has(d.name)
+        )
         .map(d => d.name)
         .sort();
 
@@ -205,8 +248,8 @@ async function startServer() {
 
   // GET /api/excalidraw/overview
   app.get('/api/excalidraw/overview', (c) => {
-    const filepath = join(rootDir, 'content', 'overview.excalidraw');
-    if (!existsSync(filepath)) return c.json({ error: 'not found' }, 404);
+    const filepath = findExcalidrawGlobal();
+    if (!filepath) return c.json({ error: 'not found' }, 404);
     try { return c.json(JSON.parse(readFileSync(filepath, 'utf-8'))); }
     catch (err) { return c.json({ error: err.message }, 500); }
   });
@@ -223,9 +266,9 @@ async function startServer() {
       catch (err) { return c.json({ error: err.message }, 500); }
     }
 
-    // Global fallback
-    const globalPath = join(rootDir, 'content', 'overview.excalidraw');
-    if (existsSync(globalPath)) {
+    // Global fallback (flexible paths)
+    const globalPath = findExcalidrawGlobal();
+    if (globalPath) {
       try { return c.json(JSON.parse(readFileSync(globalPath, 'utf-8'))); }
       catch (err) { return c.json({ error: err.message }, 500); }
     }
@@ -249,10 +292,11 @@ async function startServer() {
   // GET /api/file/lib/:file
   app.get('/api/file/lib/:file', (c) => {
     const file = c.req.param('file');
-    const libDir = join(rootDir, 'lib');
-    const filepath = join(libDir, file);
+    const libDir = resolveLibDir();
+    if (!libDir) return c.json({ error: 'lib directory not found' }, 404);
 
-    if (!existsSync(libDir) || !isPathSafe(file, libDir)) return c.json({ error: 'forbidden' }, 403);
+    const filepath = join(libDir, file);
+    if (!isPathSafe(file, libDir)) return c.json({ error: 'forbidden' }, 403);
     if (!existsSync(filepath)) return c.json({ error: 'not found' }, 404);
 
     try { return c.text(readFileSync(filepath, 'utf-8')); }
