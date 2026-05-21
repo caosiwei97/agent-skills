@@ -1,0 +1,23 @@
+skills/teaching-viz/README.md
+  217bf16dec71db75 1-49
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.16",
+  "base_commit_sha": "3ef01f73fca53861c27ea3599ae49f60a91f2a75",
+  "prompts": {
+    "217bf16dec71db75": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9f04deba-3869-4a69-8fc5-3c29bd09979e",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "caosiwei <caosiwei@cvte.com>",
+      "messages": [],
+      "total_additions": 55,
+      "total_deletions": 6,
+      "accepted_lines": 49,
+      "overriden_lines": 0
+    }
+  }
+}
