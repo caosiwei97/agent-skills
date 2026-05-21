@@ -12,6 +12,9 @@ IRON LAW: EVERY GENERATED index.mjs MUST USE mock-model — NEVER CALL A REAL LL
 ```
 Teaching Viz Progress:
 
+- [ ] Step 0: Scaffold Project ⛔ BLOCKING
+  - [ ] 0.1 Check if output is inside an existing Astro project
+  - [ ] 0.2 If not: clone template and pnpm install
 - [ ] Step 1: Parse Input ⚠️ REQUIRED
   - [ ] 1.1 Resolve source path from $ARGUMENTS
   - [ ] 1.2 Resolve output path (default: same directory)
@@ -43,6 +46,9 @@ Teaching Viz Progress:
   - [ ] List all generated files
   - [ ] Report any validation failures
   - [ ] Suggest next steps (pnpm build / pnpm dev)
+- [ ] Step 0: Scaffold Project ⛔ BLOCKING
+  - [ ] 0.1 Check if output is inside an existing Astro project
+  - [ ] 0.2 If not: clone template repo and install dependencies
 ```
 
 ## Parameters
@@ -51,6 +57,25 @@ Teaching Viz Progress:
 - `--output <path>` — where to write cases (default: `cases/` sibling to source)
 - `--dry-run` — analyze and show plan only, don't write files
 - `--only <NN-slug>` — regenerate only one specific case
+
+## Step 0: Scaffold Project ⛔ BLOCKING
+
+Check if the output directory is already inside a project with `package.json` + `astro.config.mjs` + `src/`.
+
+If NOT (user is starting from scratch):
+```bash
+git clone --depth 1 https://github.com/caosiwei97/teaching-viz-template.git <output-dir>
+rm -rf <output-dir>/.git
+cd <output-dir> && pnpm install
+```
+
+If YES (user is in an existing project): skip this step, generate directly into `cases/`.
+
+After scaffold, the output directory must have:
+- `package.json` with `astro` and `react` dependencies
+- `astro.config.mjs` with COOP/COEP headers
+- `src/` with components and WebContainer hook
+- `cases/lib/` with shared mock modules
 
 ## Step 1: Parse Input
 
@@ -198,12 +223,12 @@ Also verify:
 
 ### 5.5 Self-Verification (Functional Check)
 
-After syntax passes, verify the generated cases work in the actual Astro platform:
+After syntax passes, verify in the Astro platform:
 
-1. Copy `<output>/` into the Astro project's `cases/` directory
-2. Run `pnpm build` — must succeed without errors
-3. Run `pnpm dev` or `pnpm preview`
-4. For 2-3 sample cases, verify in browser:
+1. If Step 0 scaffolded a new project: `cd <output> && pnpm dev`
+   If inside existing project: `pnpm dev`
+2. Open http://localhost:5173
+3. For 2-3 sample cases, verify in browser:
    - Knowledge tree shows the case with correct title/group
    - "代码" tab displays the index.mjs with syntax highlighting
    - Click "运行" → WebContainer produces console output
