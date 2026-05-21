@@ -1,0 +1,25 @@
+skills/ez-explain/references/style-spec.md
+  217bf16dec71db75 87-116
+skills/ez-explain/SKILL.md
+  217bf16dec71db75 2-3,6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.16",
+  "base_commit_sha": "bbb94bf187f2e3040cd38d712863c311547357fc",
+  "prompts": {
+    "217bf16dec71db75": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9f04deba-3869-4a69-8fc5-3c29bd09979e",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "caosiwei <caosiwei@cvte.com>",
+      "messages": [],
+      "total_additions": 726,
+      "total_deletions": 388,
+      "accepted_lines": 341,
+      "overriden_lines": 0
+    }
+  }
+}
