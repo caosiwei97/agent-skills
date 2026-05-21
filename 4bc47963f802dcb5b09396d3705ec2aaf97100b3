@@ -1,0 +1,27 @@
+skills/commit/SKILL.md
+  3be88216698033e5 3-4,7-32,36,38,41,46,49,55-57,59,61,63-65,69,71,73,77,79,81-84,86,88,90-94,96,98,101-103,105,107,111,113,116,121,125,127,131,135,140,146,153,155-159,163,166,169,172,176,180,188,191,193-195,197,201,206-216
+skills/commit/references/style-detection.md
+  3be88216698033e5 1-23
+skills/commit/references/conflict-protocol.md
+  3be88216698033e5 1-69
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.16",
+  "base_commit_sha": "4bc47963f802dcb5b09396d3705ec2aaf97100b3",
+  "prompts": {
+    "3be88216698033e5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2a1e6a45-edc7-4194-acf3-07a1c8fec460",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "caosiwei <caosiwei@cvte.com>",
+      "messages": [],
+      "total_additions": 197,
+      "total_deletions": 285,
+      "accepted_lines": 197,
+      "overriden_lines": 0
+    }
+  }
+}
