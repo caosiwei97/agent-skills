@@ -1,396 +1,216 @@
 ---
 name: commit
-description: "Git 提交与推送自动化工具。触发词：提交、commit、推送、push、提交代码、commit and push、git commit、提交变更、暂存提交。自动暂存变更、生成符合仓库风格的提交信息、解决 hook 错误、处理合并冲突需用户确认后推送。无署名无 co-author。提交后自动 push。Push 前 hook 错误自动修复。冲突列举所有问题等用户确认后再处理。"
+description: "Git 提交与推送自动化工具。触发词：提交、commit、推送、push、提交代码、commit and push、git commit、提交变更、暂存提交。Triggers: commit changes, push to remote, stage and commit, git push, commit all, commit my work, push branch. Auto-stages, generates repo-style commit messages, fixes hook errors, handles merge conflicts with user confirmation before pushing. No signatures, no co-author. Auto-push after commit. Auto-fix pre-push hook errors. Lists all conflicts for user confirmation before resolving."
+allowed-tools: ["Bash", "Read", "Edit"]
 ---
 
-铁律：绝不添加任何署名。包括 Co-authored-by、Ultraworked with、AI 辅助等任何形式的签名或脚注。提交信息只有风格匹配的描述文字，没有任何附加内容。
+IRON LAW: Never add any signature. No Co-authored-by, no Ultraworked-with, no AI-assisted, no footer of any kind. Commit messages contain only style-matched descriptive text.
 
-## 工作流清单
+## Workflow Checklist
 
-> **提交技能执行进度：**
+> **Commit skill progress:**
 
-- [ ] **第一步：采集上下文** ⛔ 阻塞
-  - [ ] 1.1 并行执行 git status、diff、log
-  - [ ] 1.2 从历史记录检测提交信息风格
-  - [ ] 1.3 检查分支状态和远程追踪
-  - [ ] 1.4 区分已暂存与未暂存变更，确定提交优先级
-- [ ] **第二步：规划提交** ⚠️ 必须确认
-  - [ ] 2.1 优先规划暂存区的提交（保持用户暂存边界）
-  - [ ] 2.2 规划未暂存变更的提交（按原子拆分规则）
-  - [ ] 2.3 按检测到的风格生成提交信息
-  - [ ] 2.4 向用户展示计划并等待确认
-- [ ] **第三步：执行提交**
-  - [ ] 3.1 先提交暂存区内容（不再 git add，直接 commit）
-  - [ ] 3.2 再按依赖顺序暂存并提交未暂存变更
-  - [ ] 3.3 逐条验证提交结果
-- [ ] **第四步：推送前检查** ⛔ 阻塞
-  - [ ] 4.1 拉取远程变更（检测冲突）
-  - [ ] 4.2 有冲突 → 列举所有冲突 → 等待用户确认
-  - [ ] 4.3 运行 pre-push hook，如有错误则修复
-- [ ] **第五步：推送**
-- [ ] **第六步：验证** ⚠️ 必须
+- [ ] **Step 1: Gather Context** ⛔ BLOCKING
+  - [ ] 1.1 Run git status, diff, log in parallel
+  - [ ] 1.2 Detect commit message style from history
+  - [ ] 1.3 Check branch status and remote tracking
+  - [ ] 1.4 Classify staged vs unstaged changes
+- [ ] **Step 2: Plan Commits** ⚠️ REQUIRES CONFIRMATION
+  - [ ] 2.1 Plan staged-area commit first (respect user staging boundary)
+  - [ ] 2.2 Plan unstaged changes (atomic split rules)
+  - [ ] 2.3 Generate messages matching detected style
+  - [ ] 2.4 Present plan to user and wait for confirmation
+- [ ] **Step 3: Execute Commits**
+  - [ ] 3.1 Commit staged content directly (no re-add)
+  - [ ] 3.2 Stage and commit unstaged changes in dependency order
+  - [ ] 3.3 Verify each commit result
+- [ ] **Step 4: Pre-push Check** ⛔ BLOCKING
+  - [ ] 4.1 Fetch and rebase (detect conflicts)
+  - [ ] 4.2 Conflicts → list all → wait for user confirmation
+  - [ ] 4.3 Run pre-push hook, auto-fix errors if possible
+- [ ] **Step 5: Push**
+- [ ] **Step 6: Verify** ⚠️ REQUIRED
 
 ---
 
-## 阶段零：上下文采集（并行）
+## Step 1: Gather Context (parallel)
 
-同时执行以下所有命令：
+Run all commands simultaneously:
 
 ```bash
-# 第一组：当前状态
+# Group 1: current state
 git status --porcelain
 git diff --staged --stat
 git diff --stat
 
-# 第二组：历史记录用于风格检测
+# Group 2: history for style detection
 git log -30 --pretty=format:"%s"
 
-# 第三组：分支上下文
+# Group 3: branch context
 git branch --show-current
 git rev-parse --abbrev-ref @{upstream} 2>/dev/null || echo "NO_UPSTREAM"
 git log --oneline $(git merge-base HEAD main 2>/dev/null || git merge-base HEAD master 2>/dev/null)..HEAD 2>/dev/null
 ```
 
-需要获取的信息：
+Classify from `git status --porcelain`:
+- `A/M/D` in first column → staged
+- `??` or space in first column → unstaged
 
-1. 已暂存 vs 未暂存的文件（**关键**：`git status --porcelain` 中 `A/M/D` 开头的行为已暂存，`??` 或空格开头的行为未暂存）
-2. 最近 30 条提交信息用于风格检测
-3. 分支名、远程追踪、仅本地的提交
-4. **暂存区分类结果**：将变更分为「暂存区文件列表」和「未暂存文件列表」两组
+### Staged-First Principle
 
-### 暂存区优先原则
+Staged files = user's explicit commit boundary. Never re-add them.
 
-如果暂存区有文件，**这些文件必须作为第一个（或第一批）提交，且不重新 git add**。用户主动暂存的文件代表了用户明确的提交边界，必须尊重。
-
-- 暂存区有文件 → 第一批提交直接 `git commit`（不重新 add）
-- 未暂存文件 → 后续批次按原子拆分规则 `git add` + `git commit`
-- 只有暂存区文件 → 只需一次 commit，无需拆分
+- Staged files exist → first commit uses `git commit` directly (no git add)
+- Unstaged files → subsequent batches via `git add` + `git commit`
+- Only staged files → single commit, no splitting needed
 
 ---
 
-## 阶段一：风格检测
+## Step 2: Style Detection
 
-### 1.1 语言与风格分类
+Load `references/style-detection.md` for classification rules.
 
-从最近 30 条提交信息中判断：
-
-```
-语言：
-  - 中文字符 >= 50% → 中文
-  - 英文 >= 50% → 英文
-
-风格：
-  - 语义化："feat:"、"fix:"、"chore:"、"refactor:" 等前缀（>= 50%）
-  - 简洁描述："新增 xxx"、"修复 yyy"、"Add xxx"（>3 个词，无前缀）
-  - 极简：1-3 个词（"格式化"、"lint"、"format"）
-```
-
-### 1.2 风格检测结果
-
-```
-风格检测
-========
-语言：[中文 | 英文]
-风格：[语义化 | 简洁描述 | 极简]
-参考示例："实际提交信息 1" / "实际提交信息 2" / "实际提交信息 3"
-```
+Detect language (Chinese/English) and style (conventional/descriptive/minimal) from recent 30 commits.
 
 ---
 
-## 阶段二：提交规划 ⚠️ 需要用户确认
+## Step 3: Plan Commits ⚠️ REQUIRES CONFIRMATION
 
-### 2.1 暂存区优先提交规划
+### Staged-area planning
 
-**规则：如果暂存区有文件，优先规划为第一批提交，保持用户的暂存边界。**
+1. Staged files are never re-added — commit directly
+2. Staged files ≥ 3 → split by atomic rules
+3. Staged files < 3 → single commit
+4. Mark as `[staged]` in plan
 
-暂存区提交规则：
+### Unstaged changes planning
 
-1. 暂存区的文件**不再重新 git add**，直接使用用户已暂存的内容
-2. 暂存区文件如果 >= 3 个，按原子拆分规则拆为多个提交
-3. 暂存区文件如果 < 3 个，作为一个提交
-4. 暂存区文件在规划中标记为 `[已暂存]`
+**Rule: >3 files → must split into 2+ commits**
 
-### 2.2 未暂存变更规划
+Split priority:
+1. Different directories/modules → different commits
+2. Different concerns (UI/logic/config/test) → different commits
+3. Implementation + corresponding test → same commit
+4. Tightly coupled config changes → same commit
 
-**规则：3 个以上文件 → 必须拆分为 2 个以上提交**
+Dependency order: dependent files commit after their dependencies. When unclear, alphabetical by path.
 
-拆分优先级：
-
-1. 不同目录/模块 → 不同提交
-2. 不同关注点（UI/逻辑/配置/测试）→ 不同提交
-3. 实现文件 + 对应测试 → 同一提交
-4. 紧耦合的配置变更 → 同一提交
-
-每个包含 3 个以上文件的提交，必须用一句话说明为什么它们必须在同一个提交中。
-
-### 2.3 依赖排序
+### Present plan
 
 ```
-Level 0：工具函数、常量、类型定义
-Level 1：数据模型、接口
-Level 2：业务逻辑、服务
-Level 3：接口层、控制器
-Level 4：配置文件
+Commit Plan
+===========
+Staged files: N | Unstaged files: M | Planned commits: K
 
-按 Level 顺序提交：0 → 1 → 2 → 3 → 4
-```
+--- Staged commits (priority) ---
 
-### 2.4 向用户展示计划
-
-```
-提交计划
-========
-已暂存文件：N | 未暂存文件：M | 计划提交数：K
-
---- 暂存区提交（优先）---
-
-提交 1 [已暂存]：[按检测风格生成的信息]
+Commit 1 [staged]: <style-matched message>
   - path/to/file1
   - path/to/file2
 
---- 未暂存提交 ---
+--- Unstaged commits ---
 
-提交 2：[按检测风格生成的信息]
+Commit 2: <style-matched message>
   - path/to/file3
   - path/to/file3_test
-  原因：实现文件 + 对应测试
-
-提交 3：[按检测风格生成的信息]
-  - path/to/config
-  原因：独立的配置变更
+  Reason: implementation + test
 
 ...
 ```
 
-⚠️ 必须等待用户确认后才能执行。未收到明确「确认」/「ok」/「可以」之前，绝不继续。
+⚠️ Wait for explicit user confirmation before proceeding. Never continue without "ok"/"confirmed"/"yes".
 
 ---
 
-## 阶段三：执行提交
+## Step 4: Execute Commits
 
-### 3.1 暂存区优先提交
-
-**如果暂存区有文件，直接提交，不重新 git add：**
+### Staged-area commit
 
 ```bash
-# 确认暂存区内容（不加新文件）
 git diff --staged --stat
-
-# 直接提交暂存区内容（无署名、无 co-author、无脚注）
-git commit -m "<匹配检测风格的提交信息>"
-
-# 验证
+git commit -m "<style-matched message>"
 git log -1 --oneline
 ```
 
-**重要：暂存区文件直接 commit，绝不重新 git add。用户已暂存的文件代表了明确的提交边界。**
-
-### 3.2 未暂存变更逐组执行
+### Unstaged changes (per group)
 
 ```bash
-# 暂存文件
 git add <file1> <file2> ...
-
-# 确认暂存内容
 git diff --staged --stat
-
-# 提交（无署名、无 co-author、无脚注）
-git commit -m "<匹配检测风格的提交信息>"
-
-# 验证
+git commit -m "<style-matched message>"
 git log -1 --oneline
 ```
 
-### 3.3 关键：绝对无签名
-
-**禁止在提交中添加以下任何内容：**
-
-- `Co-authored-by: ...`
-- `Ultraworked with ...`
-- `AI 辅助`、`由 AI 生成` 等声明
-- 任何形式的署名脚注
-
-提交信息只有风格匹配的描述文字，除此之外没有任何附加内容。
-
 ---
 
-## 阶段四：推送前检查 ⛔ 阻塞
-
-### 4.1 获取远程变更并检测分歧
+## Step 5: Pre-push Check ⛔ BLOCKING
 
 ```bash
 git fetch origin
-git status --porcelain -b
-```
-
-检查本地是否落后远程：
-
-```bash
-git log HEAD..@{upstream} --oneline 2>/dev/null
-```
-
-### 4.2 变基拉取
-
-```bash
 git pull --rebase origin <branch>
 ```
 
-### 4.3 冲突处理协议
+If rebase reports conflicts → load `references/conflict-protocol.md` and follow the protocol.
 
-如果 `git pull --rebase` 报告冲突：
-
-**步骤 A：识别所有冲突文件**
-
-```bash
-git diff --name-only --diff-filter=U
-```
-
-**步骤 B：提取每个冲突文件的详细信息**
-
-```bash
-git diff <冲突文件>
-```
-
-对每个文件，找到所有冲突标记（`<<<<<<<`、`=======`、`>>>>>>>`）并记录：
-
-- 文件路径
-- 冲突区域（行号范围）
-- HEAD 版本（我们的改动）
-- 远程版本（对方的改动）
-- 每一方改动的简要描述
-
-**步骤 C：向用户展示冲突报告**
-
-```
-冲突报告
-========
-检测到 N 处冲突，涉及 M 个文件：
-
-文件：path/to/file1
-  冲突 1（第 X-Y 行）：
-    我们的改动：[描述]
-    对方的改动：[描述]
-  冲突 2（第 A-B 行）：
-    我们的改动：[描述]
-    对方的改动：[描述]
-
-文件：path/to/file2
-  冲突 1（第 C-D 行）：
-    我们的改动：[描述]
-    对方的改动：[描述]
-
-处理选项：
-1. 全部保留我们的版本
-2. 全部采用对方的版本
-3. 逐个冲突手动指定（请逐文件说明）
-4. 中止，我自己手动处理
-
-请确认处理方式。
-```
-
-⚠️ 必须等待用户确认后才能解决任何冲突。绝不自动解决冲突而不询问。
-
-**步骤 D：用户确认后解决冲突**
-
-对每个文件应用用户选择的解决方案：
-
-```bash
-# 移除冲突标记，应用选择的版本
-# 然后暂存已解决的文件
-git add <已解决文件>
-```
-
-**步骤 E：继续变基**
-
-```bash
-git rebase --continue
-```
-
-如果出现新的冲突 → 重复步骤 A-E。
-
-### 4.4 Hook 错误修复
-
-如果 pre-push hook（lint-staged、husky、eslint、prettier 等）执行失败：
-
-```bash
-# 尝试运行 hook 的自动修复命令
-# 常见模式：
-npx eslint --fix <files>
-npx prettier --write <files>
-```
-
-修复后：
-
-```bash
-git add <已修复文件>
-git commit -m "<原提交信息>" --amend --no-edit
-```
-
-如果修复后 hook 仍然失败：
-
-1. 向用户报告具体错误信息
-2. 询问用户是继续还是中止
-3. 未得到用户明确许可前，绝不使用 `--no-verify` 跳过 hook
+If pre-push hook fails:
+1. Attempt auto-fix (`npx eslint --fix`, `npx prettier --write`)
+2. Stage fixes and `git commit --amend --no-edit`
+3. If still failing → report error to user, ask whether to continue or abort
+4. Never use `--no-verify` without explicit user permission
 
 ---
 
-## 阶段五：推送
+## Step 6: Push
 
 ```bash
-# 分支尚未关联远程
+# No upstream yet
 git push -u origin <branch>
 
-# 分支已有关联远程
+# Has upstream
 git push origin <branch>
 
-# 曾对已推送的分支执行过 rebase
+# After rebase on pushed branch
 git push --force-with-lease origin <branch>
 ```
 
-绝不使用裸 `--force`。需要强制推送时始终使用 `--force-with-lease`。
+Never use bare `--force`. Always `--force-with-lease`.
 
 ---
 
-## 阶段六：验证
+## Step 7: Verify
 
 ```bash
-# 确认推送成功
 git status
-
-# 展示最终提交历史
 git log --oneline -5
-
-# 确认工作区干净
 git diff --stat
 ```
 
-### 完成报告
+### Completion report
 
 ```
-完成
+Done
 ====
-分支：<branch>
-提交数：N
-已推送至：origin/<branch>
+Branch: <branch>
+Commits: N
+Pushed to: origin/<branch>
 
-提交历史：
+History:
   <hash1> <message1>
   <hash2> <message2>
-  ...
 
-工作区：干净 | 有未提交变更（说明详情）
+Working tree: clean | has uncommitted changes (details)
 ```
 
 ---
 
-## 禁止行为清单
+## Prohibited Actions
 
-1. **禁止添加署名** — 不加 co-authored-by、ultraworked-with、任何形式的签名脚注
-2. **禁止不拉取就推送** — 推送前必须 fetch + pull --rebase
-3. **禁止自动解决冲突** — 列举所有冲突、展示给用户、等待确认后再处理
-4. **禁止用 --no-verify 跳过 hook** — 修复错误或询问用户是否允许跳过
-5. **禁止使用 --force** — 需要强制推送时用 --force-with-lease
-6. **禁止未经确认就提交** — 先展示提交计划，等用户确认
-7. **禁止 3 个以上文件打成一个提交** — 必须拆分为原子单元
-8. **禁止留下脏工作区** — 确保所有变更已提交或明确排除
-9. **禁止重新暂存已暂存文件** — 暂存区有文件时直接 commit，不重新 git add，尊重用户暂存边界
+1. **No signatures** — no co-authored-by, no AI attribution of any kind
+2. **No push without pull** — must fetch + pull --rebase before push
+3. **No auto-resolving conflicts** — list all, show to user, wait for confirmation
+4. **No --no-verify** — fix errors or ask user permission to skip
+5. **No bare --force** — use --force-with-lease
+6. **No commit without confirmation** — show plan, wait for user approval
+7. **No >3 files in one commit** — must split into atomic units
+8. **No dirty working tree** — all changes committed or explicitly excluded
+9. **No re-staging staged files** — staged area = user boundary, commit directly
