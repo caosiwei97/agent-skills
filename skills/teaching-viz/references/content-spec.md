@@ -1,188 +1,120 @@
-# Content Directory Specification
+# Content Specification
 
-## Table of Contents
-1. [Two Input Modes](#two-input-modes)
-2. [Raw Mode (Primary)](#raw-mode-primary)
-3. [Pre-Built Mode (Fallback)](#pre-built-mode-fallback)
-4. [Case Output Structure](#case-output-structure)
-5. [File Types](#file-types)
-6. [Case Discovery](#case-discovery)
-7. [Excalidraw Fallback Chain](#excalidraw-fallback-chain)
-8. [Minimal Valid Input](#minimal-valid-input)
+## Source Document Format
 
-## Two Input Modes
+Input is a Markdown file with the following structure:
 
-The skill accepts content in two formats:
+```markdown
+# Main Title
 
-| Mode | When | Input | Action |
-|------|------|-------|--------|
-| **Raw** | `.md` files found in directory root | Longform markdown + optional assets | Skill splits into cases |
-| **Pre-built** | Subdirectories with `knowledge.md` found | Already-structured case dirs | Serve as-is |
+(Optional preamble — overview/introduction)
 
-Detection priority: Raw mode checked first (`.md` in root), then pre-built (subdirs with `knowledge.md`).
+---
 
-## Raw Mode (Primary)
+## Section 1 Title
 
-User provides a directory with raw markdown files and optional assets. The skill splits them into cases.
+Content for section 1...
 
-### Input Structure
+### Sub-heading
 
-```
-input-dir/                      ← $ARGUMENTS points here
-├── some-article.md             ← One or more markdown files (longform)
-├── another-article.md
-├── overview.excalidraw         ← Optional: excalidraw assets in root
-└── assets/                     ← Optional: subdirectory for assets
-    ├── section-diagram.excalidraw
-    └── hero-image.png
+More content...
+
+---
+
+## Section 2 Title
+
+Content for section 2...
 ```
 
 ### Splitting Rules
 
-Each `.md` file in the root is split by `##` headings (h2) into cases:
+1. Split on `## ` headings (h2 level)
+2. Everything before the first `## ` is preamble (used as context, optionally becomes case "00-intro")
+3. Each `## ` section becomes one case
+4. Content within a section (including ### sub-headings) stays together
 
-1. Everything before the first `##` is the **preamble** (discarded for case creation, used as global context)
-2. Each `## Section Title` block becomes one case
-3. Content under a `##` heading includes all text until the next `##` or end of file
-4. `###` and deeper headings are preserved within the case body
-5. Case IDs are generated: `01-<slug>` where slug is derived from the heading text
+### Slug Generation
 
-### Case Generation from Raw
+| Source Heading | Generated Slug |
+|---------------|---------------|
+| ## 一、流式响应 | 01-streaming-response |
+| ## SSE 流式响应基础 | 01-sse-streaming |
+| ## Tool Call 的流式解析 | 02-tool-call-parsing |
+| ## API 挂了怎么办 | 05-api-fault-tolerance |
+| ## Agent 自己失控了怎么办 | 08-agent-runtime-safety |
 
-For each split section, the skill creates:
-```
-cases-output/
-├── 01-section-one/
-│   ├── knowledge.md        ← Section content (with ## heading promoted to #)
-│   ├── mindmap.md          ← Auto-generated from headings
-│   └── diagram.mmd         ← Auto-generated from content analysis
-├── 02-section-two/
-│   ├── knowledge.md
-│   ├── mindmap.md
-│   └── diagram.mmd
-└── lib/                    ← Empty (no shared code in raw mode)
-```
+Rules:
+- Translate Chinese conceptual titles to English technical slugs
+- Use the core technical term, not a literal translation
+- Keep it under 30 characters (excluding NN- prefix)
 
-### Asset Resolution
+### Group Assignment
 
-Excalidraw assets are searched in order:
-1. Same directory as the `.md` file (root)
-2. `assets/` subdirectory
-3. Any `.excalidraw` file found is available as a global fallback
+Analyze each section's content to determine which mechanism it teaches:
 
-## Pre-Built Mode (Fallback)
+| Group | Keywords in Content | Slug Pattern |
+|-------|--------------------|-|
+| 流式响应 | SSE, token, stream, delta, tool_call, 并发, 拼接 | 01~04 |
+| 容错机制 | retry, 429, backoff, heartbeat, 降级, failover | 05~07 |
+| 运行时安全 | loop, fingerprint, token budget, 截断, 恢复 | 08~12 |
 
-User provides a directory already structured as cases. The skill serves it directly.
+New groups can be created if content doesn't fit existing ones.
 
-### Input Structure
+## Output Directory Structure
 
 ```
-content-root/                  ← $ARGUMENTS points here
-├── 01-first-topic/
-│   ├── knowledge.md           ← REQUIRED
-│   ├── index.mjs
-│   ├── diagram.mmd
-│   ├── mindmap.md
-│   ├── interactive.html
-│   └── overview.excalidraw
-├── 02-second-topic/
-│   ├── knowledge.md
+<output>/
+├── lib/                          # Shared runtime modules
+│   ├── mock-model.mjs
+│   ├── mock-tools.mjs
+│   ├── utils.mjs
+│   ├── retry.mjs
+│   └── loop-detection.mjs
+├── 01-<slug>/
+│   ├── index.mjs                 # Executable teaching code
+│   ├── knowledge.md              # Deep knowledge article
+│   ├── diagram.mmd               # Mermaid diagram
+│   ├── mindmap.md                # Markmap headings
+│   └── interactive.html          # Standalone interactive demo
+├── 02-<slug>/
 │   └── ...
-├── content/                   ← Optional: shared excalidraw scenes
-│   └── overview.excalidraw
-└── lib/                       ← Optional: shared JS utilities
-    └── utils.mjs
 ```
 
-## Case Output Structure
+## Output File Requirements
 
-Regardless of input mode, the final directory served has this structure:
+| File | Source | Method | Size |
+|------|--------|--------|------|
+| knowledge.md | Section content | Extract + promote headings | 500-3000 words |
+| mindmap.md | knowledge.md headings | Mechanical extraction | Varies |
+| diagram.mmd | Section concepts | LLM judgment (pick best diagram type) | 10-40 lines |
+| index.mjs | Section concepts | LLM generation (mock-model code) | 80-400 lines |
+| interactive.html | Section concepts | LLM generation (visual demo) | 200-600 lines |
 
-```
-cases-root/
-├── 01-topic-name/
-│   ├── knowledge.md           ← Teaching content (REQUIRED)
-│   ├── index.mjs              ← Optional: executable code
-│   ├── diagram.mmd            ← Optional: mermaid diagram
-│   ├── mindmap.md             ← Optional: heading-based mindmap
-│   ├── interactive.html       ← Optional: interactive demo
-│   └── overview.excalidraw    ← Optional: excalidraw scene
-├── lib/                       ← Optional: shared JS utilities
-└── assets/                    ← Optional: shared assets
-```
+## Case Discovery (Frontend)
 
-## File Types
+The Astro frontend discovers cases via `src/lib/cases-loader.ts`:
+1. Scans all subdirectories in `cases/`
+2. Excludes: `lib`, `content`, `source`, `assets`, `apps`, `node_modules`, `dist`, `.git`, `_*`, `.*`
+3. Sorts by directory name (NN- prefix ensures order)
+4. Requires `index.mjs` to exist (reads metadata from JSDoc)
+5. Reads all other files if present
 
-| File | Name | Required | Auto-generatable |
-|------|------|----------|-----------------|
-| Teaching content | `knowledge.md` | YES | No (from raw mode: split) |
-| Executable code | `index.mjs` | No | No |
-| Mermaid diagram | `diagram.mmd` | No | Yes (LLM) |
-| Mindmap | `mindmap.md` | No | Yes (mechanical) |
-| Interactive demo | `interactive.html` | No | No |
-| Excalidraw scene | `overview.excalidraw` | No | No |
+## index.mjs Metadata (Required)
 
-### knowledge.md (REQUIRED)
-Markdown file with the teaching content. Standard markdown:
-- `#` for main title
-- `##` for sections
-- `###` for subsections
-- Code blocks with language tags
-- Inline formatting
-
-### diagram.mmd
-Mermaid diagram file. Common types:
-- `sequenceDiagram` — request/response flows
-- `flowchart TD/LR` — process flows
-- `graph TD` — decision trees
-
-### mindmap.md
-Markdown heading hierarchy representing a mindmap:
-```markdown
-# Root Topic
-## Branch 1
-### Leaf 1.1
-## Branch 2
-### Leaf 2.1
+```javascript
+/**
+ * @title 中文案例标题
+ * @group 流式响应|容错机制|运行时安全
+ * @description 一句话描述
+ */
 ```
 
-### interactive.html
-Self-contained HTML file loaded in an iframe. Must be fully standalone.
+These tags drive the knowledge tree UI (grouping, section numbers, display names).
 
-### overview.excalidraw
-JSON file in Excalidraw format. Rendered by @excalidraw/excalidraw React component.
+## Excalidraw Assets (Not Auto-Generated)
 
-### index.mjs
-ESM JavaScript file. Supports `@title`, `@group`, `@description` JSDoc tags.
+Excalidraw files are NOT generated by the skill. Users provide them manually at:
+- `source/assets/overview.excalidraw` — global overview
+- `source/assets/section-*.excalidraw` — per-group diagrams
 
-## Case Discovery
-
-1. Scan all subdirectories in the cases root
-2. Exclude: `lib`, `content`, `source`, `assets`, `apps`, `node_modules`, `dist`, `.git`, and any name starting with `_` or `.`
-3. Sort by directory name (natural sort — `01-`, `02-` prefixes ensure ordering)
-4. Each subdirectory is a "case" regardless of its contents
-5. A case is valid if it contains `knowledge.md`
-
-## Excalidraw Fallback Chain
-
-When rendering the Excalidraw tab for a case:
-1. Check `cases/<caseId>/overview.excalidraw` (case-level)
-2. Check `rootDir/assets/*.excalidraw` (shared assets)
-3. Check `rootDir/content/overview.excalidraw` (legacy shared)
-4. Check `rootDir/source/assets/*.excalidraw` (raw mode assets)
-5. If none found, hide the Excalidraw tab for that case
-
-## Minimal Valid Input
-
-### Raw mode (minimum)
-```
-my-teaching/
-└── article.md          ← Any markdown file with ## headings
-```
-
-### Pre-built mode (minimum)
-```
-my-cases/
-└── 01-topic/
-    └── knowledge.md
-```
+The frontend falls back from case-level → group-level → global overview.

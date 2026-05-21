@@ -1,306 +1,278 @@
 ---
 name: teaching-viz
-description: "Visualize markdown-based teaching content as an interactive web page with multiple tabs: code viewer, markdown rendering, mermaid diagrams, markmap mindmaps, excalidraw scenes, and interactive demos. Accepts raw markdown directories (splits into cases automatically) or pre-built case directories. Scan, validate, generate missing visualizations, launch a local server, and return a localhost URL. Triggers: 'visualize teaching content', 'render teaching notes', 'start teaching server', 'teaching demo', 'interactive teaching page', 'launch teaching page', 'generate mermaid from markdown', 'create mindmap from headings', '教学演示', '可视化教学内容'. Actions: visualize, render, launch, start, generate, scan, serve. Objects: teaching content, markdown, mermaid diagram, mindmap, markmap, excalidraw, interactive page, knowledge base, course materials."
+description: "Generate interactive teaching cases from markdown source documents. Splits markdown into progressive cases with 5 output files each: executable code (index.mjs for WebContainer), knowledge articles, Mermaid diagrams, Markmap mindmaps, and standalone interactive HTML demos. For Astro + React + WebContainer teaching platforms. Triggers: 'generate teaching cases', 'create cases from markdown', 'split markdown into cases', 'visualize teaching content', 'render teaching notes', 'teaching demo', '生成教学案例', '教学可视化', '从文档生成案例', '拆分教学内容', 'generate interactive demos', 'create code examples from docs'. Actions: generate, split, create, build, render, visualize. Objects: teaching cases, knowledge articles, mermaid diagrams, mindmaps, interactive demos, executable examples, markdown source."
 ---
 
 # Teaching Viz
 
-IRON LAW: NEVER START THE SERVER WITHOUT VALIDATING THE CONTENT DIRECTORY FIRST. A broken directory = a broken page = wasted user time. Always scan, validate, and confirm before launching.
+IRON LAW: EVERY GENERATED index.mjs MUST USE mock-model — NEVER CALL A REAL LLM API. A case that requires API keys is a broken case.
 
 ## Workflow
 
 ```
 Teaching Viz Progress:
 
-- [ ] Step 1: Parse Arguments ⚠️ REQUIRED
-  - [ ] 1.1 Extract directory path from $ARGUMENTS
-  - [ ] 1.2 Handle flags: --port, --stop, --dry-run
-  - [ ] 1.3 If --stop: run stop command, exit
-- [ ] Step 2: Scan Directory & Detect Mode ⚠️ REQUIRED
-  - [ ] 2.1 Run: node scripts/scan.mjs <directory>
-  - [ ] 2.2 Check mode: "raw" (markdown files in root) or "prebuilt" (subdirs with knowledge.md)
-  - [ ] 2.3 Report: mode detected, files found, cases found/suggested
-- [ ] Step 3: Split Raw Content (raw mode only)
-  - [ ] 3.1 For each .md file: split by ## headings into sections
-  - [ ] 3.2 Create case directories: 01-<slug>/, 02-<slug>/, etc.
-  - [ ] 3.3 Write knowledge.md for each case (section content with ## promoted to #)
-  - [ ] 3.4 Generate mindmap.md and diagram.mmd for each case
-  - [ ] 3.5 Copy/link any excalidraw assets to accessible location
-  - [ ] 3.6 Present splitting plan, ask user to confirm before writing
-- [ ] Step 4: Confirm Plan ⚠️ REQUIRED
-  - [ ] Present: mode, scan results, files to generate
-  - [ ] For raw mode: show suggested case breakdown
-  - [ ] For pre-built mode: show missing files
-  - [ ] Wait for user confirmation before proceeding
-- [ ] Step 5: Check Dependencies ⛔ BLOCKING
-  - [ ] 5.1 Verify node is available
-  - [ ] 5.2 Verify hono + @hono/node-server installed (or installable)
-  - [ ] 5.3 Check assets/web-dist/ exists (frontend build)
-- [ ] Step 6: Launch Server ⚠️ REQUIRED (skip if --dry-run)
-  - [ ] 6.1 Run: node scripts/serve.mjs --dir <directory> --port <port>
-  - [ ] 6.2 Verify server started (check output for URL)
-  - [ ] 6.3 Return the localhost URL to user
-- [ ] Step 7: Manage (conditional)
-  - [ ] --stop: kill server on specified port
-  - [ ] --dry-run: report only, no server launch
+- [ ] Step 1: Parse Input ⚠️ REQUIRED
+  - [ ] 1.1 Resolve source path from $ARGUMENTS
+  - [ ] 1.2 Resolve output path (default: same directory)
+  - [ ] 1.3 Handle flags: --output, --dry-run, --only <caseId>
+- [ ] Step 2: Analyze Source ⚠️ REQUIRED
+  - [ ] 2.1 Read markdown file(s)
+  - [ ] 2.2 Split by ## headings into sections
+  - [ ] 2.3 For each section: determine slug, title, group
+  - [ ] 2.4 Identify preamble (content before first ##)
+- [ ] Step 3: Confirm Plan ⚠️ REQUIRED
+  - [ ] Present case breakdown to user
+  - [ ] Show: case count, slugs, groups, files to generate
+  - [ ] Wait for explicit approval before writing
+- [ ] Step 4: Generate Cases
+  - [ ] 4.1 Create output directory structure
+  - [ ] 4.2 Copy lib/ shared modules (if not present)
+  - [ ] 4.3 For each case (in order):
+    - [ ] Generate knowledge.md
+    - [ ] Generate mindmap.md (mechanical)
+    - [ ] Generate diagram.mmd
+    - [ ] Generate index.mjs ⚠️ CRITICAL
+    - [ ] Generate interactive.html ⚠️ CRITICAL
+- [ ] Step 5: Validate ⚠️ REQUIRED
+  - [ ] 5.1 node --check every index.mjs
+  - [ ] 5.2 Verify knowledge.md is non-empty
+  - [ ] 5.3 Verify diagram.mmd is valid mermaid syntax
+  - [ ] 5.4 Verify interactive.html is well-formed HTML
+- [ ] Step 6: Report
+  - [ ] List all generated files
+  - [ ] Report any validation failures
+  - [ ] Suggest next steps (pnpm build / pnpm dev)
 ```
 
 ## Parameters
 
-- `$ARGUMENTS` — directory path (required for launch, optional for --stop)
-- `--port <number>` — server port (default: 38888)
-- `--stop` — stop running server on the port
-- `--dry-run` — scan and report only, don't start server
+- `$ARGUMENTS` — path to source markdown file or directory (required)
+- `--output <path>` — where to write cases (default: `cases/` sibling to source)
+- `--dry-run` — analyze and show plan only, don't write files
+- `--only <NN-slug>` — regenerate only one specific case
 
-## Step 1: Parse Arguments
+## Step 1: Parse Input
 
-Ask: Did the user provide a directory path? If not, ask for one (unless --stop).
+Ask: Does the user provide a source path? If not, ask for one.
 
-If `$ARGUMENTS` contains `--stop`:
-- Extract port (default 38888)
-- Run: `node <skill-dir>/scripts/serve.mjs --stop --port <port>`
-- Report result and exit
+Resolve paths:
+- Source: absolute path to .md file or directory containing .md files
+- Output: `--output` flag, or `<source-parent>/cases/`
 
-If `$ARGUMENTS` contains a path:
-- Resolve to absolute path
-- Proceed to Step 2
+## Step 2: Analyze Source
 
-## Step 2: Scan Directory & Detect Mode
-
-Run the scan script:
-```bash
-node <skill-dir>/scripts/scan.mjs <directory>
-```
-
-The script outputs JSON with a `mode` field:
-- `"raw"` — Markdown files found in root. Skill must split them into cases.
-- `"prebuilt"` — Subdirectories with knowledge.md found. Serve as-is.
-
-**Raw mode output includes:**
-- `markdownFiles` — list of .md files found
-- `assets` — excalidraw and image files found (root + assets/)
-- `suggestedCases` — proposed case breakdown (id, sourceHeading, sourceFile)
-
-**Pre-built mode output includes:**
-- `cases` — list of case directories with file status
-- `sharedFiles` — global excalidraw, lib files
-- `missingGeneration` — cases needing mindmap.md or diagram.mmd
-
-If neither mode detected: report the problem, suggest expected directory structures from `references/content-spec.md`.
-
-## Step 3: Split Raw Content (Raw Mode Only)
-
-This step is ONLY for raw mode. Skip entirely for pre-built mode.
-
-### 3.1 Split markdown into sections
-
-For each .md file in the root:
-1. Read the full content
-2. Find all `## ` headings (h2 level)
-3. Split into sections: everything from one `##` to the next (or end of file)
-4. Content before the first `##` is the preamble (global context, not a case)
-5. If no `##` headings exist, treat the entire file as one case (use `#` title)
-
-### 3.2 Create case directories
+Read each .md file. Split on `## ` headings (h2 level).
 
 For each section:
-1. Generate case ID: `01-<slug>`, `02-<slug>`, etc.
-2. Create the directory: `<input-dir>/NN-<slug>/`
-3. Write `knowledge.md`: promote `## Title` to `# Title`, include all body content
+1. Extract title from `## <title>` line
+2. Generate slug: `NN-english-kebab-case` (e.g., `01-sse-streaming`, `05-retry-backoff`)
+3. Determine group from content topic
 
-### 3.3 Generate mindmap.md (mechanical)
+Ask: Does this section teach a distinct, executable concept? If it's meta-content (references, exercise lists, preamble), it still gets a case but mark it as secondary.
 
-For each new case:
-1. Read the generated knowledge.md
-2. Extract all headings
-3. Write as heading hierarchy
+Slug rules:
+- Two-digit prefix: `01`, `02`, ... `12`
+- English lowercase kebab-case (no Chinese in directory names)
+- Max 30 characters after prefix
+- Descriptive of the core concept
 
-### 3.4 Generate diagram.mmd (LLM-assisted)
+Group assignment — ask: What is the primary mechanism this section teaches?
+- "流式响应" — SSE, streaming, tool call parsing, concurrent execution
+- "容错机制" — retry, backoff, heartbeat, degradation, failover
+- "运行时安全" — loop detection, token budget, truncation, agent loop skeleton
 
-For each new case:
-1. Analyze knowledge.md content
-2. Choose appropriate mermaid diagram type
-3. Generate and write diagram.mmd
+## Step 3: Confirm Plan ⚠️ REQUIRED
 
-### 3.5 Asset handling
-
-Any `.excalidraw` files found in root or `assets/` subdirectory are preserved in place. The serve.mjs will find them via its flexible fallback chain.
-
-### 3.6 Present plan BEFORE writing
-
-Show the user:
+Present:
 ```
-Raw markdown detected: 1 file
-  Agent-Loop-深度分享.md → 12 cases suggested
+Source: /path/to/file.md
+Output: /path/to/cases/
+Mode: Split 1 file → N cases
 
-Cases to create:
-  01-sse-streaming (from "## SSE 流式响应基础")
-  02-tool-call-parsing (from "## Tool Call 解析")
+Cases to generate:
+  01-sse-streaming        [流式响应]  "SSE 流式响应基础"
+  02-tool-call-parsing    [流式响应]  "Tool Call 流式解析"
   ...
 
-Assets found: overview.excalidraw, section-*.excalidraw
-
-This will create directories and files in: /path/to/input
-Proceed? [y/n]
-```
-
-Wait for confirmation before creating any files.
-
-### 3.7 Files NEVER auto-generated
-
-- `overview.excalidraw` — too fragile, quality unpredictable
-- `interactive.html` — too complex to auto-generate reliably
-- `index.mjs` — user's executable code
-
-## Step 3.5: Validate Cases ⚠️ REQUIRED (after generation/splitting, before final delivery)
-
-After cases are created (raw mode) or scanned (pre-built mode), validate that everything works. This step runs BEFORE confirming the final plan with the user.
-
-### Validation checklist
-
-For each case with `index.mjs`:
-1. **Code execution**: POST `/api/run` with `{caseId}` — must return SSE events including `exit` with `code: 0`
-2. **Knowledge tab**: GET `/api/file/cases/:caseId/knowledge.md` — must return 200 with non-empty content
-3. **Diagram tab**: If `diagram.mmd` exists, GET `/api/file/cases/:caseId/diagram.mmd` — must return valid mermaid
-4. **Mindmap tab**: If `mindmap.md` exists, GET `/api/file/cases/:caseId/mindmap.md` — must return valid heading structure
-
-Global checks:
-5. **Case list**: GET `/api/cases` — must return array with correct count
-6. **Excalidraw overview**: GET `/api/excalidraw/overview` — must return 200 or 404 (not 500)
-
-### Validation procedure
-
-```bash
-# 1. Start server on a test port
-node scripts/serve.mjs --dir <content-dir> --port 38889
-
-# 2. Run validation script
-node scripts/validate.mjs --port 38889
-
-# 3. Stop test server
-node scripts/serve.mjs --stop --port 38889
-```
-
-Or validate via API calls directly:
-```bash
-# Quick validation via curl
-PORT=38889
-curl -s http://localhost:$PORT/api/cases | jq length   # should match expected case count
-
-# Validate each case
-for caseId in $(curl -s http://localhost:$PORT/api/cases | jq -r '.[].id'); do
-  echo "=== $caseId ==="
-  # Check knowledge.md
-  curl -s -o /dev/null -w "knowledge: %{http_code}\n" http://localhost:$PORT/api/file/cases/$caseId/knowledge.md
-  # Check code execution (if index.mjs exists)
-  has_code=$(curl -s http://localhost:$PORT/api/cases | jq -r ".[] | select(.id==\"$caseId\") | .files | contains([\"index.mjs\"])")
-  if [ "$has_code" = "true" ]; then
-    timeout 10 curl -s -N -X POST http://localhost:$PORT/api/run -H 'Content-Type: application/json' -d "{\"caseId\":\"$caseId\"}" | grep -q '"type":"exit"'
-    echo "execution: $?"
-  fi
-done
-```
-
-### If validation fails
-
-1. Identify which cases/tabs failed
-2. Fix the root cause (missing dependency, broken import path, invalid mermaid, etc.)
-3. Re-run validation
-4. Repeat until all checks pass
-
-### Validation must pass before telling the user "done"
-
-NEVER return the URL to the user if validation has not passed. A broken page is worse than no page.
-
-## Step 4: Confirm Plan
-
-### Raw mode summary:
-```
-Content Directory: /path/to/input
-Mode: RAW (markdown splitting)
-Markdown files: 1
-Cases to create: 12
-  Will generate: knowledge.md (12), mindmap.md (12), diagram.mmd (12)
-  Will NOT generate: excalidraw, interactive.html, index.mjs
-Assets found: 3 excalidraw files
-
-Server port: 38888
-URL: http://localhost:38888
+Files per case: index.mjs, knowledge.md, diagram.mmd, mindmap.md, interactive.html
+Shared lib: mock-model.mjs, mock-tools.mjs, utils.mjs, retry.mjs, loop-detection.mjs
 
 Proceed? [y/n]
 ```
 
-### Pre-built mode summary:
+⚠️ Do NOT generate any files without explicit user approval.
+
+## Step 4: Generate Cases
+
+### 4.1 knowledge.md
+
+Extract the corresponding section from source markdown. Promote `## Title` to `# Title`.
+
+Ask: Is the content deep enough for a standalone knowledge article (500+ words)?
+- If yes: use as-is with minor formatting cleanup
+- If thin: expand with additional explanation of the concepts
+
+### 4.2 mindmap.md (mechanical — no LLM judgment needed)
+
+Extract all headings from knowledge.md. Write as pure heading hierarchy:
+```markdown
+# Root Topic
+## Sub-topic A
+### Detail A1
+### Detail A2
+## Sub-topic B
 ```
-Content Directory: /path/to/cases
-Mode: PRE-BUILT (serve as-is)
-Cases found: 12
-  Complete (all files): 5
-  Missing mindmap.md: 3  → will generate
-  Missing diagram.mmd: 4 → will generate
-  Missing excalidraw: 8  → skip (user must provide)
-  Missing interactive: 6 → skip (user must provide)
 
-Server port: 38888
-URL: http://localhost:38888
+No body text — headings only. Markmap renders this as a tree.
 
-Proceed? [y/n]
-```
+### 4.3 diagram.mmd
 
-Wait for user confirmation. If declined, adjust based on feedback.
+Ask: What is the best Mermaid diagram type for this concept?
+- Interaction flow → `sequenceDiagram`
+- Decision logic → `flowchart TD`
+- State transitions → `stateDiagram-v2`
+- Timeline/phases → `gantt` or `flowchart LR`
 
-## Step 5: Check Dependencies
+Requirements:
+- Node labels in Chinese
+- Edge labels concise (2-6 chars)
+- 8-20 nodes (not too sparse, not too dense)
+- Must be valid Mermaid syntax
 
-Check these in order:
-1. `node --version` — Node.js 18+ required
-2. `npm ls hono` in skill directory — needed for server
-3. `assets/web-dist/index.html` exists — pre-built frontend
+### 4.4 index.mjs ⚠️ CRITICAL
 
-If dependencies missing:
-- For node: tell user to install Node.js
-- For hono: offer to run `npm install hono @hono/node-server` in the scripts directory
-- For web-dist: tell user the frontend needs to be built first
+Load `references/index-mjs-spec.md` for the full specification.
 
-## Step 6: Launch Server
+**UNIFIED SKELETON RULE**: All cases share the SAME `while(true)` agent-loop skeleton. Each case adds EXACTLY ONE new feature (a function, an `if` block, or a check). The diff between case N and case N+1 should be < 30 lines.
+
+Mark new additions with `// ═══ 本案例新增 ═══` comments.
+
+Core rules:
+- Header JSDoc with @title, @group, @description
+- Import only from: `ai`, `zod`, `../lib/mock-model.mjs`, `../lib/mock-tools.mjs`, `../lib/utils.mjs`
+- Use `createMockModel()` or `createMultiTurnModel()` — NEVER real API calls
+- Use `streamText` from `ai` package
+- Console.log with standard prefixes: `[用户]`, `[工具调用]`, `[退出]`, `[完成]`
+- 80-200 lines
+- Wrap in `async function agentLoop() { ... } agentLoop().catch(console.error);`
+
+Ask: What ONE new mechanism does this case demonstrate?
+- Design the simplest possible addition to the base skeleton
+- A reader who understood the previous case should only need to read the new block
+
+### 4.5 interactive.html ⚠️ CRITICAL
+
+Load `references/interactive-html-spec.md` for the full specification.
+
+Core rules:
+- Single file, zero external dependencies
+- Dark theme: background #1e1e1e, text #cccccc, mono font
+- 100% height layout, no scrollbar on body
+- Button-driven simulation (user clicks to trigger)
+- Visual feedback: animations, color transitions, progress bars
+- 200-600 lines
+
+Ask: What interactive simulation would help a learner understand this concept?
+- Retry → show exponential delay growth with bar chart
+- Streaming → show tokens appearing one by one
+- Concurrency → show timeline of parallel vs serial execution
+- Loop detection → show fingerprint matching animation
+
+## Step 5: Validate ⚠️ REQUIRED
 
 ```bash
-node <skill-dir>/scripts/serve.mjs --dir <content-dir> --port <port>
+# Syntax check all generated code
+for f in <output>/*/index.mjs; do node --check "$f"; done
 ```
 
-The script outputs the URL on success. Return it to the user:
-```
-Server started: http://localhost:38888
-Content directory: /path/to/content
-```
+If validation fails:
+1. Fix the syntax error
+2. Re-validate
+3. Repeat until all pass
 
-If the port is already in use, offer to:
-- Use a different port
-- Stop the existing server first
+Also verify:
+- Every knowledge.md has `# ` title on line 1
+- Every diagram.mmd starts with a valid diagram type keyword
+- Every interactive.html has `<!DOCTYPE html>` and `</html>`
+
+### 5.5 Self-Verification (Functional Check)
+
+After syntax passes, verify the generated cases work in the actual Astro platform:
+
+1. Copy `<output>/` into the Astro project's `cases/` directory
+2. Run `pnpm build` — must succeed without errors
+3. Run `pnpm dev` or `pnpm preview`
+4. For 2-3 sample cases, verify in browser:
+   - Knowledge tree shows the case with correct title/group
+   - "代码" tab displays the index.mjs with syntax highlighting
+   - Click "运行" → WebContainer produces console output
+   - "流程图" tab renders the Mermaid diagram
+   - "思维导图" tab renders the Markmap tree
+   - "交互演示" tab loads the HTML and buttons are clickable
+
+If any tab fails to render, fix the source file and re-validate.
+
+Also verify:
+- Every knowledge.md has `# ` title on line 1
+- Every diagram.mmd starts with a valid diagram type keyword
+- Every interactive.html has `<!DOCTYPE html>` and `</html>`
 
 ## Anti-Patterns
 
-- **Don't overwrite user files.** If `diagram.mmd` or `mindmap.md` already exists, skip it.
-- **Don't auto-generate excalidraw or interactive HTML.** Too complex, quality unpredictable.
-- **Don't skip validation.** Starting a server on a broken directory wastes the user's time.
-- **Don't hardcode paths.** The content directory comes from `$ARGUMENTS`.
-- **Don't assume a specific directory structure.** Use scan.mjs to detect mode.
-- **Don't start on an occupied port.** Always check first, offer alternatives.
-- **Don't split without confirmation.** Raw mode splitting creates files — user must approve.
+- **Calling real APIs in index.mjs** — IRON LAW violation. Use mock-model always.
+- **Chinese in directory names** — breaks path handling. Use English kebab-case slugs.
+- **External CDN links in interactive.html** — must be fully self-contained.
+- **Copy-pasting source markdown as knowledge.md without promotion** — must promote ## to #.
+- **Mindmap with body text** — mindmap.md is headings ONLY, no paragraphs.
+- **Diagram with >20 nodes** — becomes unreadable. Focus on the core flow.
+- **index.mjs without console.log** — the output IS the teaching. Silent code teaches nothing.
+- **interactive.html with white background** — must match dark theme (#1e1e1e).
+- **Generating Excalidraw files** — too fragile, skip. User provides these manually.
+- **Skipping the confirmation gate** — always show plan and wait for approval.
 
 ## Red Flags (return to Step 2 if any appear)
 
-- "I'll just start the server and see what happens" — NO. Scan first.
-- "Let me generate an excalidraw file" — NO. Too fragile.
-- "The directory structure doesn't matter" — NO. It matters for the frontend.
-- "I'll skip the confirmation step" — NO. User must approve generation plan.
-- "I'll assume the mode without scanning" — NO. Always run scan.mjs first.
+- "I'll just generate all files without checking..." — NO. Validate after generation.
+- "Let me call the OpenAI API to demonstrate..." — NO. Mock model only.
+- "I'll use a CDN for the chart library..." — NO. Self-contained HTML.
+- "The directory name can use Chinese..." — NO. English slugs only.
+- "I'll skip the interactive demo, it's too complex..." — NO. Every case needs one.
 
 ## Pre-Delivery Checklist
 
-- [ ] SKILL.md under 500 lines (current: count before packaging)
-- [ ] Frontmatter has `name` and `description` only
-- [ ] Description uses keyword bombing (5+ action verbs, 5+ object nouns, natural phrases)
-- [ ] No README.md or unnecessary files in skill directory
-- [ ] No placeholder text (TODO, FIXME, xxx)
-- [ ] scripts/ pass `node --check` validation
-- [ ] assets/web-dist/index.html exists (frontend build)
+### Structure
+- [ ] Output has `lib/` directory with all 5 shared modules
+- [ ] Each case directory named `NN-english-slug` (2-digit prefix)
+- [ ] Each case has exactly 5 files: index.mjs, knowledge.md, diagram.mmd, mindmap.md, interactive.html
+
+### index.mjs
+- [ ] Has @title, @group, @description in JSDoc header
+- [ ] Imports only from `ai`, `zod`, `../lib/*.mjs`
+- [ ] Uses createMockModel or createMultiTurnModel (no real API)
+- [ ] Passes `node --check` without error
+- [ ] Has console.log output explaining concepts
+- [ ] 80-400 lines
+
+### knowledge.md
+- [ ] Starts with `# Title` (not `## Title`)
+- [ ] 500+ words of substantive content
+- [ ] Has code blocks with language tags
+
+### diagram.mmd
+- [ ] Valid Mermaid syntax (sequenceDiagram / flowchart / stateDiagram)
+- [ ] Chinese node labels
+- [ ] 8-20 nodes
+
+### mindmap.md
+- [ ] Only contains headings (# ## ### ####)
+- [ ] No body text between headings
+- [ ] Matches knowledge.md structure
+
+### interactive.html
+- [ ] Valid HTML5 with DOCTYPE
+- [ ] Dark theme (background: #1e1e1e)
+- [ ] No external dependencies (no CDN, no imports)
+- [ ] Has at least one interactive button
+- [ ] 200-600 lines
+- [ ] Body overflow: hidden, height: 100%
