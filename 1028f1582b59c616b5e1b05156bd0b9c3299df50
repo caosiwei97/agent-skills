@@ -1,0 +1,29 @@
+skills/ez-explain/README.md
+  7aefb72285fd80ea 17-20
+README.md
+  7aefb72285fd80ea 9-11,16-19
+skills/commit/README.md
+  7aefb72285fd80ea 19-22
+skills/teaching-viz/README.md
+  7aefb72285fd80ea 29-32
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.16",
+  "base_commit_sha": "1028f1582b59c616b5e1b05156bd0b9c3299df50",
+  "prompts": {
+    "7aefb72285fd80ea": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "24831980-7ed0-49c3-aea4-e664752b2def",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "caosiwei <caosiwei@cvte.com>",
+      "messages": [],
+      "total_additions": 19,
+      "total_deletions": 4,
+      "accepted_lines": 19,
+      "overriden_lines": 0
+    }
+  }
+}
