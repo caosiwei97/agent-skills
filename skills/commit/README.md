@@ -16,6 +16,10 @@ Git 提交与推送自动化 Skill。
 ## 安装
 
 ```bash
+# 全局安装（所有项目可用）
+npx skills add caosiwei97/agent-skills --path skills/commit --global
+
+# 仅当前项目
 npx skills add caosiwei97/agent-skills --path skills/commit
 ```
 

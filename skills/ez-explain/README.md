@@ -14,6 +14,10 @@
 ## 安装
 
 ```bash
+# 全局安装（所有项目可用）
+npx skills add caosiwei97/agent-skills --path skills/ez-explain --global
+
+# 仅当前项目
 npx skills add caosiwei97/agent-skills --path skills/ez-explain
 ```
 

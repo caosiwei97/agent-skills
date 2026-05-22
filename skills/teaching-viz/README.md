@@ -26,6 +26,10 @@ Astro + React + WebContainer 教学站点。生成内容可直接在浏览器沙
 ## 安装
 
 ```bash
+# 全局安装（所有项目可用）
+npx skills add caosiwei97/agent-skills --path skills/teaching-viz --global
+
+# 仅当前项目
 npx skills add caosiwei97/agent-skills --path skills/teaching-viz
 ```
 
