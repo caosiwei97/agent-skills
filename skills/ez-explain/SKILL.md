@@ -60,8 +60,25 @@ Rewrite Progress:
 
 接受以下输入形式：
 - 本地文件路径（.md / .txt / .html）
-- URL（自动抓取内容）
+- 公网 URL（自动抓取内容）
 - 对话中粘贴的文本块
+
+### URL 读取策略
+
+当输入包含 URL 时，按以下顺序尝试读取：
+
+1. **WebFetch**（优先）：适用于大部分公开博客、文档站、GitHub。直接抓取并转为文本。
+2. **Playwright 浏览器**（兜底）：当 WebFetch 失败或返回空内容时使用——适用于需要 JS 渲染的页面（SPA、飞书/Notion/语雀等在线文档）。
+   - 导航到 URL，等待页面加载
+   - 使用 `browser_snapshot` 获取可访问性树或使用 `browser_evaluate` 提取正文内容
+   - 关闭页面释放资源
+
+判断依据：
+- 静态页面（博客、GitHub、MDN）→ WebFetch
+- 在线文档平台（飞书、Notion、语雀、Google Docs）→ Playwright
+- 不确定 → 先 WebFetch，失败后 fallback 到 Playwright
+
+如果 URL 需要登录才能访问，告知用户无法读取，请求其将内容粘贴到对话中。
 
 多源输入规则：
 - 无论输入几篇来源，输出始终为**一篇**融合文章
