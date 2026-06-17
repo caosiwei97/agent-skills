@@ -12,6 +12,7 @@
 #   UNREACHABLE      — cannot reach GitLab instance
 #   GLAB_NOT_INSTALLED — glab CLI not found
 #   GLAB_NOT_AUTHED  — glab not authenticated for configured hostname
+#   OK (with UPDATE_AVAILABLE note) — ready, but official glab skill has update
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -61,12 +62,45 @@ fi
 
 # ── Check glab auth ──────────────────────────────────────────────
 GLAB_AUTH_OUTPUT=$(glab auth status --hostname "$HOSTNAME" 2>&1) || true
-if echo "$GLAB_AUTH_OUTPUT" | grep -qi "not logged in\|no credentials\|NEED_AUTH" 2>/dev/null; then
+if echo "$GLAB_AUTH_OUTPUT" | grep -qiE "not logged in|no credentials|not authenticated"; then
   echo "GLAB_NOT_AUTHED"
   echo "glab is not authenticated for $HOSTNAME."
   echo "Run: echo \"\$GITLAB_TOKEN\" | glab auth login --hostname $HOSTNAME --stdin"
   exit 1
 fi
+
+# ── Version check helpers (non-blocking) ──────────────────────────
+read_json_field() {
+  local file="$1" field="$2"
+  if command -v jq &>/dev/null; then
+    jq -r ".$field // empty" "$file" 2>/dev/null
+  else
+    grep -o "\"$field\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$file" | \
+      sed "s/\"$field\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\"/\1/" | head -1
+  fi
+}
+
+check_glab_skill_update() {
+  local local_hash remote_hash raw
+  local_hash=$(read_json_field "$CONFIG_FILE" "glab_skill_commit")
+
+  raw=$(curl -sfL --connect-timeout 5 --max-time 10 \
+    "https://gitlab.com/api/v4/projects/gitlab-org%2Fai%2Fskills/repository/commits?path=skills/glab&per_page=1" 2>/dev/null) || return 0
+  [[ -z "$raw" ]] && return 0
+
+  if command -v jq &>/dev/null; then
+    remote_hash=$(echo "$raw" | jq -r '.[0].id // empty' 2>/dev/null || true)
+  else
+    remote_hash=$(echo "$raw" | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+  fi
+
+  [[ -z "$remote_hash" ]] && return 0
+  [[ "$local_hash" == "$remote_hash" ]] && return 0
+
+  echo "UPDATE_AVAILABLE"
+  echo "Official glab skill has a new version (remote: ${remote_hash:0:8}, local: ${local_hash:-(none)})."
+  echo "Run: bash $SCRIPT_DIR/sync-glab-skill.sh"
+}
 
 # ── Test API connectivity ────────────────────────────────────────
 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
@@ -77,6 +111,7 @@ HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
 
 case "$HTTP_CODE" in
   200)
+    check_glab_skill_update
     echo "OK"
     ;;
   401)

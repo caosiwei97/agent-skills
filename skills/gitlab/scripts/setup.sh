@@ -215,3 +215,8 @@ echo "  Hostname: $HOSTNAME"
 echo "  Platform: $OS ($ARCH)"
 echo ""
 echo "Add GITLAB_TOKEN to your shell profile or .env file for persistent use."
+
+# ── Sync official glab skill ──────────────────────────────────────
+echo ""
+echo "Syncing official glab skill ..."
+bash "$SCRIPT_DIR/sync-glab-skill.sh" || echo "WARN: glab skill sync failed (non-fatal, retry later)"
