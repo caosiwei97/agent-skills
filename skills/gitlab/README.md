@@ -1,38 +1,26 @@
 # gitlab
 
-GitLab 操作 Skill，支持任意 GitLab 实例（自托管 / SaaS）。
+GitLab 配置与连接管理 Skill，解决 glab 装不上、连不上、token 过期的前置问题。
 
 ## 功能
 
-- **跨平台自动安装**：macOS / Linux / Windows 自动检测并安装 glab CLI
-- **首次配置引导**：交互式输入 GitLab URL + Token，自动验证连通性
-- **Token 过期检测**：每次操作前自动检查 API 连通性和 glab 认证状态
-- **MR 管理**：创建、合并、关闭 Merge Request（防重复创建）
-- **分支推送**：fetch → rebase → 推送，force push 必须 `--force-with-lease` + 用户确认
-- **CI/CD 流水线**：查看状态、追踪失败 job、自动分类错误、flaky 检测与重试
-- **安全**：Iron Law 禁止输出 TOKEN 明文，token 不持久化
+- **跨平台自动安装 glab**：macOS / Linux / Windows 自动检测并安装（brew/apt/scoop/winget/choco/go/binary）
+- **首次配置引导**：交互式输入任意 GitLab 实例 URL + Token，自动验证连通性
+- **Token 过期检测**：每次操作前自动检查 API 连通性（`/api/v4/user`）
+- **安全**：Token 不持久化，Iron Law 禁止明文输出
+
+## 定位
+
+本 skill 只负责 **配置与连接层**。GitLab 操作命令（MR / Issue / CI / Pipeline 等）交给 [`gitlab-org/ai/skills`](https://gitlab.com/gitlab-org/ai/skills) 的 `glab` skill 处理。两个 skill 叠加使用，各司其职。
 
 ## 安装
 
 ```bash
-# 全局安装（所有项目可用）
+# 本 skill（配置层）
 npx skills add caosiwei97/agent-skills --path skills/gitlab --global
 
-# 仅当前项目
-npx skills add caosiwei97/agent-skills --path skills/gitlab
-```
-
-## 使用
-
-首次使用时会自动引导配置 GitLab URL 和 Token，之后直接触发操作：
-
-```
-配置 GitLab
-发起 MR / 创建合并请求
-合到 main / 合并 MR
-推送分支 / push 一下
-流水线挂了 / CI 失败
-重试流水线 / 看看 job
+# 官方 glab skill（命令层）
+npx @dgruzd/skills add https://gitlab.com/gitlab-org/ai/skills/-/tree/main/skills --global --agent opencode --skill glab
 ```
 
 ## 环境变量
@@ -42,6 +30,10 @@ export GITLAB_TOKEN=<your-personal-access-token>
 ```
 
 Token 需要 `api` scope。
+
+## 触发词
+
+配置 GitLab、setup glab、GitLab token expired、check GitLab connection、GitLab 连不上、token 过期
 
 ## License
 
